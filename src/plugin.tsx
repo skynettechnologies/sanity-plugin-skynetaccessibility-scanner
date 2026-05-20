@@ -104,7 +104,7 @@ const HomePage: React.FC = () => {
           method: 'POST',
           body: new URLSearchParams({
             website: encodedDomain,
-            platform: 'Strapi',
+            platform: 'sanity',
             is_trial_period: '1',
             name: websiteName,
             email: `no-reply@${websiteName}`,
@@ -147,6 +147,23 @@ const HomePage: React.FC = () => {
           dashboard_link: scanResult.dashboard_link || '',
           total_fail_sum: row.total_fail_sum || '',
           is_expired: row.is_expired || '',
+        }
+
+        const rowUserData = scanResult?.userData?.[0] || {};        
+        var saved_user_email = rowUserData.email || null;
+        var saved_user_id = rowUserData.id || null;        
+        const userIdInput = document.getElementById("skynetRegUserId") as HTMLInputElement | null;
+        if (userIdInput) {
+          userIdInput.value = saved_user_id;
+        }
+
+        console.log(saved_user_email);
+        const isNoReply = saved_user_email.toLowerCase().includes("no-reply");
+        if (isNoReply) {
+          const emailSection = document.getElementById("email_update_section");
+          if (emailSection) {
+            emailSection.style.display = "block";
+          }          
         }
 
         // 3️⃣ Get Scan Count
@@ -362,6 +379,168 @@ const HomePage: React.FC = () => {
     window.open(url, '_blank')
   }
 
+  /**
+     * _skynetToggleEmailForm
+     * Show or hide the email registration form panel (accordion toggle).
+     */
+    const skynetToggleEmailForm = (e) => {    
+        if (e) e.preventDefault();
+
+        const wrapper = document.getElementById('skynetEmailToggleWrapper');
+        const panel   = document.getElementById('skynetEmailFormPanel');
+        if (!wrapper || !panel) return;
+
+        const isOpen = wrapper.classList.contains('skynet-form-open');
+        if (isOpen) {
+            panel.style.display = 'none';
+            wrapper.classList.remove('skynet-form-open');
+        } else {
+            panel.style.display = 'block';
+            wrapper.classList.add('skynet-form-open');
+            // Clear previous messages on each open
+            const errEl = document.getElementById('skynetEmailFormError');
+            const okEl  = document.getElementById('skynetEmailFormSuccess');
+            if (errEl) errEl.style.display = 'none';
+            if (okEl)  okEl.style.display  = 'none';
+        }
+    };
+
+    /**
+     * _skynetSaveEmail
+     * Validate name + email, then call registerDomain() API.
+     * On success: hide the entire toggle wrapper (email is now set).
+     *
+     * NOTE: In production this calls the real registerDomain() function
+     * which posts FormData to skynetaccessibilityscan.com.
+     * In this standalone skynetscanner it calls skynetscannerRegisterEmail() instead.
+     */
+    const skynetSaveEmail = (e) => {       
+        if (e) e.preventDefault();
+
+        const userIdInput = document.getElementById('skynetRegUserId');
+        const nameInput  = document.getElementById('skynetRegName');
+        const emailInput = document.getElementById('skynetRegEmail');
+        const errEl      = document.getElementById('skynetEmailFormError');
+        const okEl       = document.getElementById('skynetEmailFormSuccess');
+        const saveBtn    = document.getElementById('skynetRegSaveBtn');
+        const saveTxt    = document.getElementById('skynetRegSaveBtnText');
+        const spinner    = document.getElementById('skynetRegSaveSpinner');
+
+        // Clear previous error state
+        [nameInput, emailInput].forEach(el => el && el.classList.remove('skynet-input-error'));
+        if (errEl) errEl.style.display = 'none';
+        if (okEl)  okEl.style.display  = 'none';
+
+        // ── Validate ──
+        const name  = (nameInput  && nameInput.value.trim())  || '';
+        const email = (emailInput && emailInput.value.trim()) || '';
+        const userid = (userIdInput && userIdInput.value.trim()) || '';
+        
+        let hasError = false;
+
+        if (!name) {
+            nameInput && nameInput.classList.add('skynet-input-error');
+            hasError = true;
+        }
+        const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRe.test(email)) {
+            emailInput && emailInput.classList.add('skynet-input-error');
+            hasError = true;
+        }
+        if (hasError) {
+            if (errEl) {
+                errEl.textContent = 'Please enter a valid name and email address.';
+                errEl.style.display = 'block';
+            }
+            return;
+        }
+
+        // ── Show loading state ──
+        if (saveBtn) saveBtn.disabled = true;
+        if (saveTxt) saveTxt.textContent = 'Saving…';
+        if (spinner) spinner.style.display = 'inline-block';
+
+        try {
+            const websiteUrl = window.location.origin;
+            let domain = '';
+            try { domain = new URL(websiteUrl).hostname; }
+            catch (_) { domain = websiteUrl.replace(/^https?:\/\//, '').split('/')[0]; }
+
+            const userInfo = { name, email, userid };
+
+            // In production: await registerDomain(websiteUrl, userInfo, domain);
+            // In this skynetscanner:
+            await skynetscannerRegisterEmail(websiteUrl, userInfo, domain);
+
+            // ── Success ──
+            if (okEl) {
+                okEl.textContent = 'Email registered successfully!';
+                okEl.style.display = 'block';
+            }
+            setTimeout(function () {
+                const wrapper = document.getElementById('email_update_section');
+                if (wrapper) wrapper.style.display = 'none';
+            }, 1200);
+
+        } catch (err) {
+            const msg = (err && err.message) ? err.message : 'Registration failed. Please try again.';
+            if (errEl) {
+                errEl.textContent = msg;
+                errEl.style.display = 'block';
+            }
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveTxt) saveTxt.textContent = 'Save';
+            if (spinner) spinner.style.display = 'none';
+        }
+    };
+
+    /**
+     * _skynetHandleEmailToggle
+     * Called after user-info fetch. Shows wrapper if email is missing/fallback.
+     */
+    function skynetHandleEmailToggle(userInfoResponse) {
+        const wrapper = document.getElementById('skynetEmailToggleWrapper');
+        if (!wrapper) return;
+        const email = (userInfoResponse && userInfoResponse.email) || '';
+        const isFallback = !email || email.startsWith('no-reply@');
+        wrapper.style.display = isFallback ? 'block' : 'none';
+    }
+
+    /* ─────────────────────────────────────────────
+       skynetscanner HELPERS — not part of the production module
+    ───────────────────────────────────────────── */
+
+    /** Simulates a 1.2 s network delay, then resolves successfully */
+    function skynetscannerRegisterEmail(websiteUrl, userInfo, domain) {
+        return new Promise(async (resolve, reject) => {
+            
+            try {
+                const response = await fetch('https://skynetaccessibilityscan.com/api/update-user', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: userInfo.userid,
+                        name: userInfo.name,
+                        email: userInfo.email
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resolve({ status: '0'}); // expected { status: '1' } or similar
+                } else {
+                    reject({ status: '0'});
+                }
+            } catch (error) {
+                reject({ status: '0', error: error.message });
+            }
+        });
+    }
+
   if (loading)
     return (
       <div
@@ -408,11 +587,7 @@ const HomePage: React.FC = () => {
           rel="icon"
           type="image/png"
         />
-        {/* <link
-        rel="stylesheet"
-        type="text/css"
-        href="https://strapi.skynettechnologies.us/bootstrap.min.css"
-      /> */}
+                
         <link
           rel="stylesheet"
           type="text/css"
@@ -441,7 +616,97 @@ const HomePage: React.FC = () => {
                               >
                                 <div className="node__content clearfix ">
                                   <div className="scanning-monitoring-app">
-                                    <div className="scans">
+                                    <div class="skynetscanner-card" id="email_update_section"  style={{ display: "none" }}>
+                                  <div id="skynetEmailToggleWrapper" style="display:block;">
+                                      <div class="skynet-email-toggle-bar">
+                                          <span class="skynet-email-toggle-label">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none"
+                                                  viewBox="0 0 24 24" style="vertical-align:middle;margin-right:6px;">
+                                              <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9
+                                                        2-2V6c0-1.1-.9-2-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"
+                                                    fill="#420083"/>
+                                            </svg>
+                                            Please enter your Email for further Scanning Reports.
+                                          </span>
+                                          <button id="skynetEmailToggleBtn"
+                                                  class="skynet-email-toggle-btn"
+                                                  type="button"
+                                                  onClick={() => skynetToggleEmailForm(Event)}
+                                                  >
+                                              <span id="skynetEmailToggleBtnText">Add Email</span>                            
+                                              <svg id="skynetEmailToggleArrow"
+                                                    xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+                                                    viewBox="0 0 24 24" fill="none"
+                                                    style="margin-left:6px;transition:transform 0.25s;">
+                                                  <path d="M7 10l5 5 5-5H7z" fill="currentColor"/>
+                                              </svg>
+                                          </button>
+                                      </div>
+                                      <div id="skynetEmailFormPanel" class="skynet-email-form-panel" style="display:none;">
+                                          <div class="skynet-email-form-inner">
+
+                                              <h3 class="skynet-email-form-title">Register Your Details</h3>
+                                              <input type="hidden" id="skynetRegUserId" value="" />
+
+                                              
+                                              <div id="skynetEmailFormError"
+                                                    class="skynet-email-form-error"
+                                                    style="display:none;"></div>
+                                              <div id="skynetEmailFormSuccess"
+                                                    class="skynet-email-form-success"
+                                                    style="display:none;"></div>
+
+                                              <div class="skynet-email-form-row">
+                                                  <label class="skynet-email-form-label" for="skynetRegName">
+                                                      Full Name <span style="color:#e53e3e;">*</span>
+                                                  </label>
+                                                  <input id="skynetRegName"
+                                                          class="skynet-email-form-input"
+                                                          type="text"
+                                                          placeholder="Enter your full name"
+                                                          autocomplete="name" />
+                                              </div>
+                                              <div class="skynet-email-form-row">
+                                                  <label class="skynet-email-form-label" for="skynetRegEmail">
+                                                      Email Address <span style="color:#e53e3e;">*</span>
+                                                  </label>
+                                                  <input id="skynetRegEmail"
+                                                          class="skynet-email-form-input"
+                                                          type="email"
+                                                          placeholder="Enter your email address"
+                                                          autocomplete="email" />
+                                              </div>
+                                              <div class="skynet-email-form-actions">
+                                                  
+                                                  <button id="skynetRegSaveBtn"
+                                                          class="skynet-email-save-btn"
+                                                          type="button"
+                                                          onClick={() => skynetSaveEmail(Event)}
+                                                          >
+                                                      <span id="skynetRegSaveBtnText">Save</span>
+                                                      <svg id="skynetRegSaveSpinner"
+                                                            xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                                            viewBox="0 0 24 24" fill="none"
+                                                            style="display:none;margin-left:8px;
+animation:skynet-spin 0.8s linear infinite;">
+                                                          <circle cx="12" cy="12" r="10"
+                                                                  stroke="currentColor" stroke-width="3"
+                                                                  stroke-dasharray="31.4" stroke-dashoffset="10"/>
+                                                      </svg>
+                                                  </button>
+                                                  <button class="skynet-email-cancel-btn"
+                                                          type="button"
+                                                          onClick={() => skynetToggleEmailForm(Event)}
+                                                          >
+                                                      Cancel
+                                                  </button>
+                                              </div>
+
+                                          </div>
+                                      </div>
+                                  </div>
+                                    </div>
+                                    <div className="scans" id="my_scan_sections">
                                       <p className="title">My Scans</p>
                                       <section
                                         className="status"

@@ -1,4 +1,4 @@
-# SkynetAccessibility Scanner: Strapi Plugin
+# SkynetAccessibility Scanner: Sanity Plugin
 
 ## Overview
 
